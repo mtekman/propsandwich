@@ -1,0 +1,27 @@
+#!/bin/bash
+
+#:: user input
+bc_pattern=NNNNNNCCCCCC
+#gzipped=true
+
+#:: static - bin - conda
+conda=~/miniconda/bin/conda
+activate=~/miniconda/bin/activate
+deactivate=~/miniconda/bin/deactivate
+
+#:: static - whitelist
+whitelist_out=whitelist.1.txt
+whitelist_raw=whitelist.2.raw
+#:: static - extract
+R1_fixedfastq=R1.fixed.fastq.gz
+R2_fixedfastq=R2.fixed.fastq.gz
+#:: static - RNA star
+bam_star=
+bam_featurecounts=$(mktemp -p $scratch_dir)
+bam_sorted=$(mktemp -p $scratch_dir)
+counts_matrix=$(mktemp -p $scratch_dir)
+
+
+#:: tool - config - rna star
+star_index=hg38_noalt_junc85_99.dir
+star_threads=7
