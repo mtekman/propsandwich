@@ -11,21 +11,22 @@ function help {
 
 [ $# -lt 2 ] && help
 
- 
 plate_name=$1
 input_dir=$2
 working_dir=wd/$plate_name
 
-R1_fastq=$(find $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R1" )
-R2_fastq=$(find $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R2" )
+R1_fastq=$(find -L $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R1" )
+R2_fastq=$(find -L $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R2" )
 
 if [ "$R1_fastq" = "" ] || [ "$R2_fastq" = "" ]; then
-    echo "Cannot find R1 or R2 for $plate_name"
-    help
+    echo -e "\nError: Cannot find R1 or R2 for $plate_name"
+    exit -1
 fi
 mkdir -p $working_dir
 
-echo "Processing: $plate_name with R1 = [$R1_fastq] and R2 = [$R2_fastq]"
+echo "Processing: $plate_name with:
+- R1 = [$R1_fastq] and 
+- R2 = [$R2_fastq]"
 sleep 3
 
 # Load bin config and file basenames
@@ -37,8 +38,6 @@ if [ -e $working_dir/$counts_matrix ]; then
     exit 0
 fi
 
-# Load env
-source $activate propsandwich
 
 # Takes FASTQ from a single plate and generates a list of barcodes
 function umitools_whitelist_plate {
@@ -52,12 +51,16 @@ function umitools_whitelist_plate {
               --bc-pattern=$bc_pattern\
               --stdin=$R1_fastq\
               --method=reads\
-              --plot-prefix=whitelist\
-              > $white_1
+              --log2stderr\
+              --plot-prefix=$working_dir/whitelist\
+              2> $working_dir/whitelist_log.txt\
+              > $white_1 &&
 
-    cat $white_1
+    cat $white_1\
         | awk '{print NR"\t"$1}'\
-              > $white_2
+              > $white_2 &&
+
+    return 0
 }
 
 
@@ -78,10 +81,10 @@ function umitools_extract_plate {
               --read2-in=$R2_fastq\
               --read2-out=$R2_fix\
               --filter-cell-barcode\
-              --whitelist=$white
+              --whitelist=$white &&
 
     # R1_fix and R2_fix generated, but R2_fix is useful to us
-
+    return 0
 }
 
 function rnastar_map {
@@ -92,25 +95,30 @@ function rnastar_map {
          --readFilesIn $input_sequences\
          --readFilesCommand zcat\
          --outFilterMultimapNmax 1\
-         --outSAMtype BAM SortedByCoordinate
+         --outSAMtype BAM SortedByCoordinate &&
+
+    return 0
 }
 
 function featurecounts {
     local star_bam=$1
+
     featureCounts \
         -a $geneset \
         -o gene_assigned \
         -R BAM $star_bam \
-        -T $fc_threads
+        -T $fc_threads &&
+
+    return 0
 }
 
 function samtool_sort_index {
     local bam_fc=$1
     local sorted_indexed_bam=$working_dir/$bam_samtool_sortindex
-    samtools sort $bam_fc -o $sorted_indexed_bam
-    samtools index $sorted_indexed_bam
+    samtools sort $bam_fc -o $sorted_indexed_bam &&
+    samtools index $sorted_indexed_bam &&
 
-    echo $sorted_indexed_bam
+    return 0
 }
 
 function umitools_count {
@@ -122,8 +130,8 @@ function umitools_count {
               --per-cell\
               -I $sorted_bam\
               -S $cm\
-              --wide-format-cell-counts
-    echo $cm
+              --wide-format-cell-counts &&
+    return 0
 }
 
 function processPlate {
@@ -150,6 +158,9 @@ function processPlate {
         umitools_count $bam_sorted
 }
 
+# Load env + execute
+source $activate propsandwich
+processPlate
 source $deactivate propsandwich
 
 

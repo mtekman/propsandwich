@@ -24,13 +24,15 @@ fi
 names=$(cat $platelist_file)
 
 # job config
-nthreads=8
+nthreads=1
 
 ####
 
 # queue and dispatch jobs
 echo ":: Running all plates"
-parallel -u -j $nthreads run_single_plate.sh {} $input_dir ::: $names
+#parallel --citation -u -j $nthreads ./run_single_plate.sh {} $input_dir ::: $names &&
+./run_single_plate.sh `head -1 $platelist_file` $input_dir
+
 
 #####
 
@@ -49,7 +51,7 @@ for plate_name in $names; do
     cat $count_matrix\
         | sed 1 "s/\b([^\b])\b/${plate_name}__\1/g"\
               > $outdir/$plate_name.$(basename $count_matrix .tsv).renamed.tsv
-done
+done &&
 
 if [ "$errors" = "Y" ]; then
     echo " -- Errors detected, please re-run script."
@@ -81,7 +83,7 @@ for plate_name in $names; do
     tmp_matrix=`mktemp`
     join -j 1 $running_matrix $renamed_matrix > $tmp_matrix
     mv $tmp_matrix $renamed_matrix
-done
+done &&
 
 if [ "$errors" = "Y" ]; then
     echo " -- Errors detected, please re-run script."
