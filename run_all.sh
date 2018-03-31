@@ -1,8 +1,14 @@
 #!/bin/bash
 
-# This script reads in a list of plate names, feeds each into run_single_plate
-# reassigns the header of each resultant count_matrix, and then merges all the
-# matrices into one giant super matrix
+function help {
+    echo "This script reads in a list of plate names, feeds each into run_single_plate, reassigns the header of each resultant count_matrix, and then merges all the matrices into one giant super matrix.
+
+    `basename $0` <platelist.txt> <input_FASTQ_all_plates_dir>
+" >&2
+    exit -1
+}
+
+[ $# -lt 2 ] && help
 
 platelist_file=$1
 input_dir=$2
@@ -12,14 +18,13 @@ mkdir -p $outdir
 
 if [ "$platelist_file" = "" ] || ! [ -e $input_dir ]; then
     echo "Cannot find plate list file, or input dir does not exist"
-    exit -1
+    help
 fi
 
 names=$(cat $platelist_file)
 
 # job config
 nthreads=8
-
 
 ####
 
@@ -64,7 +69,7 @@ for plate_name in $names; do
         errors=Y
         continue
     fi
-    
+
     if [ "$running_matrix" = "0" ]; then  # first matrix is base matrix
         running_matrix=$renamed_matrix
         echo -n "Merging $plate_name"
@@ -75,7 +80,7 @@ for plate_name in $names; do
     echo -n "<- $plate_name"
     tmp_matrix=`mktemp`
     join -j 1 $running_matrix $renamed_matrix > $tmp_matrix
-    mv $tmp_matrix $renamed_matrix    
+    mv $tmp_matrix $renamed_matrix
 done
 
 if [ "$errors" = "Y" ]; then

@@ -1,8 +1,17 @@
 #!/bin/bash
 
-# This script produces a count matrix that is valid for only one plate
-# To run this for multiple plates, please call this multiple times with
-# different plate_names
+function help {
+    echo "This script produces a count matrix that is valid for only one plate. To run this for multiple plates, please call this multiple times with different plate_names, or use the run_all.sh wrapper
+
+    `basename $0` <plate_name> <input_dir>
+
+" >&2
+    exit -1
+}
+
+[ $# -lt 2 ] && help
+
+ 
 plate_name=$1
 input_dir=$2
 working_dir=wd/$plate_name
@@ -12,7 +21,7 @@ R2_fastq=$(find $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R2" )
 
 if [ "$R1_fastq" = "" ] || [ "$R2_fastq" = "" ]; then
     echo "Cannot find R1 or R2 for $plate_name"
-    exit -1
+    help
 fi
 mkdir -p $working_dir
 
@@ -112,7 +121,8 @@ function umitools_count {
               --gene-tag=XT\
               --per-cell\
               -I $sorted_bam\
-              -S $cm
+              -S $cm\
+              --wide-format-cell-counts
     echo $cm
 }
 
