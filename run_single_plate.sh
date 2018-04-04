@@ -15,6 +15,9 @@ plate_name=$1
 input_dir=$2
 working_dir=wd/$plate_name
 
+# dry run, echo outputs only
+dry=""
+
 R1_fastq=$(find -L $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R1" )
 R2_fastq=$(find -L $input_dir -type f -name "*${plate_name}*.fastq*" | grep "R2" )
 
@@ -27,13 +30,14 @@ mkdir -p $working_dir
 echo "Processing: $plate_name with:
 - R1 = [$R1_fastq] and 
 - R2 = [$R2_fastq]"
-sleep 3
+sleep 1
 
 # Load bin config and file basenames
 source single_plate.config
 
+
 # Quick check to see whether directory has already been processed
-if [ -e $working_dir/$counts_matrix ]; then
+if [ -s $working_dir/$counts_matrix ]; then
     echo "Already processed $plate_name, skipping!"
     exit 0
 fi
@@ -47,20 +51,26 @@ function umitools_whitelist_plate {
     local white_1=$working_dir/$whitelist_out
     local white_2=$working_dir/$whitelist_raw
 
-    umi_tools whitelist\
-              --bc-pattern=$bc_pattern\
-              --stdin=$R1_fastq\
-              --method=reads\
-              --log2stderr\
-              --plot-prefix=$working_dir/whitelist\
-              2> $working_dir/whitelist_log.txt\
-              > $white_1 &&
+    if [ "$dry" = "" ]; then
 
-    cat $white_1\
-        | awk '{print NR"\t"$1}'\
-              > $white_2 &&
+            umi_tools whitelist\
+                  --bc-pattern=$bc_pattern\
+                  --stdin=$R1_fastq\
+                  --method=reads\
+                  --log2stderr\
+                  --plot-prefix=$working_dir/whitelist\
+                  2> $working_dir/whitelist_log.txt\
+                  > $white_1 &&
 
-    return 0
+            cat $white_1\
+                | awk '{print NR"\t"$1}'\
+                      > $white_2 &&
+            echo $white_2
+
+    else
+        echo $white_2
+    fi
+
 }
 
 
@@ -69,127 +79,184 @@ function umitools_whitelist_plate {
 function umitools_extract_plate {
     local R1_fastq=$1
     local R2_fastq=$2
-
-    local white=$working_dir/$whitelist_raw
+    local white=$3
     local R1_fix=$working_dir/$R1_fixedfastq
     local R2_fix=$working_dir/$R2_fixedfastq
 
-    umi_tools extract\
-              --bc-pattern=$bc_pattern\
-              --stdin=$R1_fastq\
-              --stdout=$R1_fix\
-              --read2-in=$R2_fastq\
-              --read2-out=$R2_fix\
-              --filter-cell-barcode\
-              --whitelist=$white &&
-
+    if [ "$dry" = "" ]; then   
+        umi_tools extract\
+                  --bc-pattern=$bc_pattern\
+                  --stdin=$R1_fastq\
+                  --read2-in=$R2_fastq\
+                  --stdout=$R1_fix\
+                  --read2-out=$R2_fix\
+                  --filter-cell-barcode\
+                  --whitelist=$white &&
+            echo $R2_fix
+    fi
+    echo $R2_fix
     # R1_fix and R2_fix generated, but R2_fix is useful to us
-    return 0
+}
+
+
+function getSTARIndex {
+    star_index=tmp_star/m16_gencode_merged.gtf.gz
+
+    while ! [ -s $star_index ]; do
+        echo "Star index not found, generating..."
+        sleep 1
+        generate_star_index $star_index
+    done
+
+    echo $star_index
 }
 
 function rnastar_map {
     local input_sequences=$1
 
-    STAR --runThreadN $star_threads\
-         --genomeDir $star_index\
-         --readFilesIn $input_sequences\
-         --readFilesCommand zcat\
-         --outFilterMultimapNmax 1\
-         --outSAMtype BAM SortedByCoordinate &&
-
-    return 0
+    if [ "$dry" = "" ]; then
+        STAR --runThreadN $star_threads\
+             --genomeDir $(getSTARIndex)\
+             --readFilesIn $input_sequences\
+             --readFilesCommand zcat\
+             --outFilterMultimapNmax 1\
+             --outSAMtype BAM SortedByCoordinate &&
+            echo TEST_BAM
+    else
+       echo TEST_BAM 
+    fi
 }
 
 function featurecounts {
     local star_bam=$1
+    local out_counts=$working_dir/$bam_featurecounts
 
-    featureCounts \
-        -a $geneset \
-        -o gene_assigned \
-        -R BAM $star_bam \
-        -T $fc_threads &&
-
-    return 0
+    if [ "$dry" = "" ]; then
+        featureCounts \
+            -a $geneset \
+            -o $out_counts \
+            -R BAM $star_bam \
+            -T $fc_threads &&
+            echo $out_counts
+    else
+        echo $out_counts
+    fi
 }
 
 function samtool_sort_index {
     local bam_fc=$1
     local sorted_indexed_bam=$working_dir/$bam_samtool_sortindex
-    samtools sort $bam_fc -o $sorted_indexed_bam &&
-    samtools index $sorted_indexed_bam &&
 
-    return 0
+    if [ "$dry" = "" ]; then
+        samtools sort $bam_fc -o $sorted_indexed_bam &&
+            samtools index $sorted_indexed_bam &&
+            echo $sorted_indexed_bam
+    else
+        echo $sorted_indexed_bam
+    fi
+
 }
 
 function umitools_count {
     local sorted_bam=$1
     local cm=$working_dir/$counts_matrix
-    umi_tools count\
-              --per-gene\
-              --gene-tag=XT\
-              --per-cell\
-              -I $sorted_bam\
-              -S $cm\
-              --wide-format-cell-counts &&
-    return 0
+
+    if [ "$dry" = "" ]; then
+        umi_tools count\
+                  --per-gene\
+                  --gene-tag=XT\
+                  --per-cell\
+                  -I $sorted_bam\
+                  -S $cm\
+                  --wide-format-cell-counts &&
+            echo $cm
+    else
+        echo $cm
+    fi
 }
 
 function processPlate {
     # All functions specify the desired output file as the first argument
     # - Also, all files are tempfiles generated in a dir with plenty of space
-    echo "\n\nPlate $plate_name" &&
+    echo "Plate $plate_name" &&
         echo "Detecting barcodes..." &&
         # make whitelist_raw
-        umitools_whitelist_plate $R1_fastq $R2_fastq &&
+        dry="T"
+        whitelist_raw=$(umitools_whitelist_plate $R1_fastq $R2_fastq) &&
         echo -e "\nExtracting barcodes..." &&
         # make R1 and R2 fixedfastq
-        umitools_extract_plate $R1_fastq $R2_fastq $whitelist_raw &&
+        extracted_reads=$(umitools_extract_plate $R1_fastq $R2_fastq $whitelist_raw) &&
         echo -e "\nMapping..." &&
         # make bam_star
-        rnastar_map $extracted_reads &&
+        dry=""
+        bam_star=$(rnastar_map $extracted_reads) &&
         echo -e "\nFeature Counts..." &&
         # make bam_featurecounts
-        featurecounts $bam_star &&
+        bam_featurecounts=$(featurecounts $bam_star) &&
         echo -e "\nSorting FC output..." &&
         # make bam_sorted
-        samtool_sort_index $bam_featurecounts &&
+        bam_sorted=$(samtool_sort_index $bam_featurecounts) &&
         echo -e "\nCounting molecules..." &&
         # make counts_matrix
-        umitools_count $bam_sorted
+        counts=$(umitools_count $bam_sorted) &&
+
+        echo $counts
 }
+
+
+function generate_star_index {
+    local tmp=tmp_star
+    mkdir -p $tmp
+    # Links
+    local fastam16_url=ftp://ftp.sanger.ac.uk/pub/gencode/Gencode_mouse/release_M16/GRCm38.primary_assembly.genome.fa.gz
+    local annotm16_url=ftp://ftp.sanger.ac.uk/pub/gencode/Gencode_mouse/release_M16/gencode.vM16.annotation.gtf.gz
+
+    #Names
+    local genome_fasta=$tmp/$(basename $fastam16_url)
+    local annot_gtf=$tmp/$(basename $annotm16_url)
+    
+    echo "1. Generate GTF file of merged transcripts"
+    outname=$1
+    tmp1=tmp_star/m16_gencode.gtf.gz
+    tmp2=tmp_star/star_m16
+
+    wget -c $annotm16_url -O $tmp1 &&
+        # Tool doesn't work unless we look only for lines with transcript_id
+        zcat $tmp1 | head | grep "^#" > $tmp1.edited &&
+        zcat $tmp1 | grep "transcript_id" >> $tmp1.edited &&
+        cgat gtf2gtf --method=merge-exons -I $tmp1.edited | cgat gtf2gtf --method=set-transcript-to-gene | gzip > $tmp2 &&
+
+        mv $star_gtf_tmp $annot_gtf &&
+
+        echo "2. Download Fasta and perform Index generation" &&
+        wget -c $fastam16_url -O $genome_fasta &&
+        gunzip $genome_fasta &&
+        genome_fasta=$tmp/$(basename $genome_fasta .fa.gz).fa &&
+        mkdir $tmp/star_tmp &&
+        STAR --runThreadN 4 --runMode genomeGenerate --genomeDir $tmp/star_tmp \
+--genomeFastaFiles $genome_fasta --sjdbGTFfile $annot_gtf --sjdbOverhang 99
+
+    
+
+   
+#    STAR --runThreadN 4 --runMode genomeGenerate --genomeDir genomedir --genomeFastaFiles GRCm38.primary_assembly.genome.fa  ../tmp_star/m16_gencode.gtf.gz --sjdbOverhang 99
+    
+#   STAR --runThreadN 4 --runMode genomeGenerate --genomeDir $(getSTARIndex)\
+--genomeFastaFiles $fasta
+
+}
+
+
+
+
+function generate_star_flattened_gtf {
+
+    
+}
+
 
 # Load env + execute
 source $activate propsandwich
-processPlate
+#processPlate
+generate_star_index tmp_star/m16_gencode_merged.gtf.gz
 source $deactivate propsandwich
-
-
-
-
-## Depreciated
-
-# # C (remove barcode sequence from read)
-# jes_c=true
-# # ADD (add barcode to read header)
-# jes_add=true
-# # BPOS (where the barcode lies)
-# jes_bpos=READ_1
-# function jesuite_demultiplex {
-#     R1_fastq=$1
-#     R2_fastq=$2
-#     barcodes=$3
-#     outp_dir=$4
-
-#     je demultiplex\
-#        F1=$R1_fastq F2=$R2_fastq\
-#        SAME_HEADERS=false\
-#        BARCODE_FILE=$barcodes\
-#        BPOS=$jes_bpos C=$jes_c ADD=$jes_add\
-#        MM=1 MMD=1 Q=10\
-#        QUALITY_FORMAT=Standard\
-#        XT=0 ZT=0 RCHAR=: GZ=$gzipped\
-#        OUTPUT_DIR=$outp_dir\
-#        KEEP_UNASSIGNED_READ=false\
-#        STATS_ONLY=false\
-#        METRICS_FILE_NAME=${stage_demulti}.metrics
-# }
